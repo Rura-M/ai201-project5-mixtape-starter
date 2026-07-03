@@ -183,3 +183,72 @@ Song.shared_by
 Notification.user_id
     points to the user who should receive the notification
 ```
+
+
+## Bugs Fixes
+### My listening streak keeps resetting
+
+**Issue number and title:** Issue 1: My listening streak keeps resetting
+
+**How I reproduced it:** I reproduced it by running the streak tests:
+
+```bash
+.venv/bin/python3 -m pytest tests/test_streaks.py -q
+```
+
+The test file had one failure:
+
+```text
+tests/test_streaks.py::test_streak_increments_on_sunday
+```
+
+That test creates a user, records a listen on Saturday, June 15, 2024, and then records another listen on Sunday, June 16, 2024. Since those dates are consecutive calendar days, the user's streak should increase from `1` to `2`. Instead, the streak stayed at `1`, which confirmed the bug.
+
+**How I found the root cause:** I started from the failing test in `tests/test_streaks.py`, specifically `test_streak_increments_on_sunday`. That test calls `update_listening_streak(u, saturday)` and then `update_listening_streak(u, sunday)`, so I followed that function into `services/streak_service.py`.
+
+Inside `update_listening_streak`, I looked at the code that calculates `days_since_last` and decides whether to increment or reset the streak. This condition made me confident I had found the exact cause:
+
+```python
+elif days_since_last == 1 and today.weekday() != 6:
+```
+
+The failure only happened for Sunday, and in Python, `weekday()` returns `6` for Sunday. That connected the failing input directly to the condition.
+
+**The root cause:** The root cause is in the `update_listening_streak` function in `services/streak_service.py`. The specific faulty condition is:
+
+```python
+elif days_since_last == 1 and today.weekday() != 6:
+```
+
+The variable `days_since_last` correctly identifies that Saturday to Sunday is a one-day gap, so that part of the logic is working. The problem is the second comparison, `today.weekday() != 6`. In Python, Sunday is represented by `6`, so this condition says: increment the streak only if the user listened yesterday and today is not Sunday.
+
+When a user listens on Saturday and then Sunday, the state is:
+
+```text
+days_since_last == 1
+today.weekday() == 6
+```
+
+Because `today.weekday() != 6` is false on Sunday, the whole `elif` condition fails. The function then falls into the `else` branch and sets `user.listening_streak = 1`, which resets the streak instead of incrementing it.
+
+The correct behavior requires something different because the app's streak rule is based on consecutive calendar days, not on the weekday name. If the gap is exactly one day, the streak should increment no matter whether the current day is Monday, Sunday, or any other day. The Sunday comparison adds an unrelated rule that contradicts the intended streak behavior.
+
+**Fix and side-effect check:** The fix is to remove the Sunday exception and only check whether the user listened exactly one calendar day after their previous listen.
+
+Change this:
+
+```python
+elif days_since_last == 1 and today.weekday() != 6:
+    user.listening_streak += 1
+```
+
+To this:
+
+```python
+elif days_since_last == 1:
+    user.listening_streak += 1
+```
+
+This fixes the root cause because the streak now increments for every consecutive-day listen, including Saturday to Sunday.
+
+The side-effect check is that the other streak behaviors should still pass: new users start at `1`, same-day listens do not double-count, normal consecutive weekdays increment the streak, skipped days reset the streak to `1`, and Saturday-to-Sunday now increments correctly.
