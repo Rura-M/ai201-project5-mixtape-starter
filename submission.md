@@ -432,3 +432,11 @@ I used AI to help reproduce the listening streak issue by running the streak tes
 ### Instance 3: Fixing and documenting search and playlist issues
 
 I used AI to help trace Issue 3 from `tests/test_search.py` to `services/search_service.py`, where the search query joined through `song_tags` and needed distinct song results. I also used AI to help trace Issue 5 from `tests/test_playlists.py` to `services/playlist_service.py`, where `songs[:-1]` removed the final playlist song. After making the code changes, I used AI to run the focused tests and the full test suite, then summarize the root causes and side-effect checks in this submission.
+
+### Instance 4: Formatting the submission.md
+I used AI to format the submission.md to make it more fromal and improve readability.
+
+## Fix Screenshots
+
+- ![Fix screenshot](Screenshot%202026-07-02%20at%2011.01.57%E2%80%AFPM.png)
+
