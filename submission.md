@@ -98,3 +98,88 @@ Association tables:
   - `rate_song(...)`: creates or updates a rating.
   - `get_notifications(...)`: returns notifications.
   - `mark_as_read(...)`: marks one notification read.
+
+```text
+Searching for songs
+GET /songs/search
+→ routes/songs.py: search()
+→ services/search_service.py: search_songs()
+→ models.py: Song, Tag, song_tags
+→ tests/test_search.py
+```
+
+```text
+Viewing playlist songs
+GET /playlists/<id>/songs
+→ routes/playlists.py: get_songs()
+→ services/playlist_service.py: get_playlist_songs()
+→ models.py: Playlist, Song, playlist_entries
+→ tests/test_playlists.py
+```
+
+```text
+Recording a listen and updating a streak
+POST /songs/<id>/listen
+→ routes/songs.py: listen()
+→ services/streak_service.py: record_listening_event()
+→ services/streak_service.py: update_listening_streak()
+→ models.py: User, ListeningEvent
+→ tests/test_streaks.py
+```
+
+```text
+Viewing friends listening now
+GET /feed/<user_id>/listening-now
+→ routes/feed.py: listening_now()
+→ services/feed_service.py: get_friends_listening_now()
+→ models.py: User, ListeningEvent, Song, friendships
+```
+
+```text
+Rating a song
+POST /songs/<id>/rate
+→ routes/songs.py: rate()
+→ services/notification_service.py: rate_song()
+→ models.py: Rating, Song, User, Notification
+```
+
+
+## Feature Data Flow: Adding A Song To A Playlist Creates A Notification
+
+This app does not currently have a dedicated "share song" route, but songs have a `shared_by` owner. The clearest notification flow is when one user adds another user's shared song to a playlist:
+
+```text
+POST /playlists/<playlist_id>/songs
+    ↓
+routes/playlists.py: add_song()
+    - Reads JSON body fields: song_id and added_by
+    - Calls add_to_playlist(playlist_id, song_id, added_by)
+    ↓
+services/notification_service.py: add_to_playlist()
+    - Loads the Song, User who added it, and Playlist
+    - Appends the song to playlist.songs if it is not already present
+    - Commits the playlist change
+    - If the adder is not the original sharer, creates a notification
+    ↓
+services/notification_service.py: create_notification()
+    - Inserts a Notification row for song.shared_by
+    - Uses notification_type = "song_added_to_playlist"
+    - Commits the notification
+    ↓
+GET /users/<shared_by_user_id>/notifications
+    ↓
+routes/users.py: notifications()
+    ↓
+services/notification_service.py: get_notifications()
+    - Returns notifications ordered newest first
+```
+
+The key data relationship is:
+
+```text
+Song.shared_by
+    points to the user who originally shared the song
+
+Notification.user_id
+    points to the user who should receive the notification
+```
