@@ -252,3 +252,79 @@ elif days_since_last == 1:
 This fixes the root cause because the streak now increments for every consecutive-day listen, including Saturday to Sunday.
 
 The side-effect check is that the other streak behaviors should still pass: new users start at `1`, same-day listens do not double-count, normal consecutive weekdays increment the streak, skipped days reset the streak to `1`, and Saturday-to-Sunday now increments correctly.
+
+### The same song keeps showing up twice in search
+
+**Issue number and title:** Issue 3: The same song keeps showing up twice in search
+
+**How I reproduced it:** I used the search tests because they already create the exact app state that triggers this issue: a song with multiple tags. The key test is `test_search_no_duplicates_multi_tag_song` in `tests/test_search.py`.
+
+The test data creates a song called `"Crown Heights Anthem"` and connects it to three tags:
+
+```text
+rap
+hip-hop
+boom bap
+```
+
+Then it searches for `"Crown Heights"`:
+
+```python
+results = search_songs("Crown Heights")
+matching = [r for r in results if r["title"] == "Crown Heights Anthem"]
+```
+
+The expected result is that `"Crown Heights Anthem"` appears once, even though it has multiple tags. The bug condition is a search result where the matching song has more than one row in the `song_tags` association table.
+
+**How I found the root cause:** I started from `tests/test_search.py`, because that file describes the expected behavior for search results. The multi-tag test pointed me to the `search_songs` function in `services/search_service.py`.
+
+Inside `search_songs`, I found that the query loads `Song` records but also joins through the `song_tags` table:
+
+```python
+db.session.query(Song)
+    .outerjoin(song_tags, Song.id == song_tags.c.song_id)
+```
+
+That made me confident I had found the right area because the reported behavior only happens for songs with multiple tags, and `song_tags` is the table that creates one row per song/tag pair. The specific problem was that the query did not explicitly ask for distinct songs after joining through a table that can contain multiple rows for the same song.
+
+**The root cause:** The root cause is in the `search_songs` function in `services/search_service.py`. The function joins `Song` to `song_tags`, but the query originally did not include a distinct result constraint.
+
+The specific logic problem is this:
+
+```text
+One song can have multiple tag rows in song_tags.
+The search query joins against song_tags.
+Without distinct song results, the same Song can be returned once per matching joined row.
+```
+
+For example, `"Crown Heights Anthem"` has three tags. That means the join can produce three SQL rows for the same song ID. Search results should be based on unique songs, not on unique song/tag join rows. The correct behavior requires deduplicating by song because tags are extra metadata on a song, not separate search results.
+
+**Fix and side-effect check:** I changed the query in `services/search_service.py` to explicitly return distinct songs:
+
+```python
+.distinct()
+```
+
+The fixed query now keeps the existing title/artist search behavior but prevents a multi-tag song from appearing more than once in the returned list.
+
+I also removed the unused `Tag` import from `services/search_service.py`, since the service only needs `Song` and `song_tags`.
+
+After the fix, I ran the focused search tests:
+
+```bash
+.venv/bin/python -m pytest tests/test_search.py -q
+```
+
+The result was:
+
+```text
+5 passed
+```
+
+For the side-effect check, I also ran the full test suite:
+
+```bash
+.venv/bin/python -m pytest tests/ -q
+```
+
+The search and streak tests passed. The remaining failures were in the playlist tests, which are for a separate issue about the last song in a playlist not showing up. That confirmed the search change did not break the existing search behavior.
