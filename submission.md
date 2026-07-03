@@ -418,3 +418,17 @@ For the side-effect check, I also ran the full test suite:
 
 The result was that the related test cases passed.
 That confirmed the playlist fix did not break search or streak behavior.
+
+## AI Usage
+
+### Instance 1: Codebase map and architecture understanding
+
+I used AI to help inspect the repository structure and summarize the main files, routes, services, models, and tests. This helped me understand the app architecture before starting bug fixes. I verified the map by reading the actual files, including `app.py`, `models.py`, the `routes/` files, the `services/` files, and the test files.
+
+### Instance 2: Reproducing and analyzing Issue 1
+
+I used AI to help reproduce the listening streak issue by running the streak tests and tracing the failure from `tests/test_streaks.py` to `services/streak_service.py`. The AI helped identify the specific faulty condition in `update_listening_streak`: `today.weekday() != 6`. I confirmed the reasoning by checking that Python represents Sunday as `6` and that the bug only appeared when the consecutive listen happened on Sunday.
+
+### Instance 3: Fixing and documenting search and playlist issues
+
+I used AI to help trace Issue 3 from `tests/test_search.py` to `services/search_service.py`, where the search query joined through `song_tags` and needed distinct song results. I also used AI to help trace Issue 5 from `tests/test_playlists.py` to `services/playlist_service.py`, where `songs[:-1]` removed the final playlist song. After making the code changes, I used AI to run the focused tests and the full test suite, then summarize the root causes and side-effect checks in this submission.
