@@ -328,3 +328,93 @@ For the side-effect check, I also ran the full test suite:
 ```
 
 The search and streak tests passed. The remaining failures were in the playlist tests, which are for a separate issue about the last song in a playlist not showing up. That confirmed the search change did not break the existing search behavior.
+
+### The last song in a playlist never shows up
+
+**Issue number and title:** Issue 5: The last song in a playlist never shows up
+
+**How I reproduced it:** I reproduced the issue by running the playlist tests before changing the playlist service:
+
+```bash
+.venv/bin/python -m pytest tests/test_playlists.py -q
+```
+
+Two tests failed:
+
+```text
+tests/test_playlists.py::test_playlist_returns_all_songs
+tests/test_playlists.py::test_playlist_returns_songs_in_order
+```
+
+The test setup creates a playlist with five songs: `"Track 1"` through `"Track 5"`. When `get_playlist_songs(playlist_id)` ran, the returned list only had four songs. The title list was missing `"Track 5"`, which confirmed that the final playlist song was being dropped.
+
+**How I found the root cause:** I started from `tests/test_playlists.py`, specifically the two failing tests. Both tests call the same service function:
+
+```python
+get_playlist_songs(playlist_id)
+```
+
+So I followed that function into `services/playlist_service.py`. Inside `get_playlist_songs`, the database query correctly joins `Song` to `playlist_entries`, filters by the playlist ID, and orders by `playlist_entries.c.position`.
+
+The query itself looked correct because it used:
+
+```python
+.order_by(asc(playlist_entries.c.position))
+```
+
+The specific cause was at the return statement:
+
+```python
+return [song.to_dict() for song in songs[:-1]]
+```
+
+That made me confident I had found the exact problem because `songs[:-1]` is Python slicing syntax that returns every element except the last one.
+
+**The root cause:** The root cause is in the `get_playlist_songs` function in `services/playlist_service.py`. The function queried all songs for the playlist correctly, but then sliced the result list with `songs[:-1]`.
+
+The specific logic error is:
+
+```text
+songs contains all playlist songs in order.
+songs[:-1] removes the final item from that list.
+The function returns the sliced list instead of the complete list.
+```
+
+For a playlist with five songs, `songs[:-1]` returns only the first four songs. That is why `"Track 5"` never appears in the response. The correct behavior requires returning every song from the ordered query because `get_playlist_songs` is supposed to show the complete playlist, not all but the final entry.
+
+**Fix and side-effect check:** I changed the return statement in `services/playlist_service.py`.
+
+Change this:
+
+```python
+return [song.to_dict() for song in songs[:-1]]
+```
+
+To this:
+
+```python
+return [song.to_dict() for song in songs]
+```
+
+This fixes the root cause because the function now converts every queried `Song` into a dictionary instead of dropping the last one.
+
+After the fix, I reran the focused playlist tests:
+
+```bash
+.venv/bin/python -m pytest tests/test_playlists.py -q
+```
+
+The result was:
+
+```text
+3 passed
+```
+
+For the side-effect check, I also ran the full test suite:
+
+```bash
+.venv/bin/python -m pytest tests/ -q
+```
+
+The result was that the related test cases passed.
+That confirmed the playlist fix did not break search or streak behavior.
